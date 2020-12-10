@@ -301,3 +301,58 @@ simulate.hmm.uni = function(duration, numChain=1,numStates, numMix, initDist,tma
   }
   return(y.sim)
 }
+
+# DIC and ELBO calculations
+uDIC = function(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transition_mat,
+                ct=ct_wide,pi_1=pi_j,alpha=alpha_j,zeta=zeta_j,shape=gamma_jp,rate=delta_jp,initProb=q_p){
+   pd0 <- 0
+   pd1 <- 0
+   pd2 <- 0
+  for(j in 1:numStates)
+  {
+     pd0 <- pd0 + sum(stateProb[,j,]*mixProb[,j,1,])*(log(zeta[j,1]) - log(sum(zeta[j,])) - 
+                digamma(zeta[j,1]) + digamma(sum(zeta[j,])) )
+
+    for(p in 2:numMix)
+    {
+      pd2 <- pd2 + sum(stateProb[,j,]*mixProb[,j,p,])*( log(shape[j,p-1]) - digamma(shape[j,p-1]) +
+                   log(zeta[j,p]) - log(sum(zeta[j,])) - digamma(zeta[j,p]) + digamma(sum(zeta[j,])) )
+     
+    }
+    for(l in 1:numStates)
+    pd1 <- pd1 + rowSums(A_t,dims = 2)[j,l]*( log(alpha[j,l]) - log(sum(alpha[j,])) - digamma(alpha[j,l]) + digamma(sum(alpha[j,])) )
+   
+  }
+   pd3 = sum(initProb*(log(pi_1) - log(sum(pi_1)) - digamma(pi_1) + digamma(sum(pi_1))))
+  
+   dic <- 4*(pd0+sum(pd1)+pd2+pd3)  + 2*sum(log(ct))
+  return(dic)
+
+}
+uELBO = function(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transition_mat,
+                ct=ct_wide,pi_1=pi_j,alpha=alpha_j,zeta=zeta_j,shape=gamma_jp,rate=delta_jp,obs=y2,h=h_jp,initProb=q_p){
+kl_C <- 0
+kl_A <- 0
+kl_theta <- 0
+kl_pi <- 0
+for(j in 1:numStates)
+{
+  kl_C = kl_C + sum(stateProb[,j,]*mixProb[,j,1,])*(digamma(zeta[j,1]) - digamma(sum(zeta[j,])) ) + 
+    lgamma(sum(zeta[j,])) - sum(lgamma(zeta[j,])) #-
+    #lgamma(sum(zeta_0[j,])) + sum(lgamma(zeta_0[j,]))
+  for(p in 2:numMix)
+  {
+    kl_C = kl_C + sum(stateProb[,j,]*mixProb[,j,p,])*(digamma(zeta[j,p]) - digamma(sum(zeta[j,])) ) 
+    kl_theta = kl_theta + sum(stateProb[,j,]*mixProb[,j,p,])*( digamma(shape[j,p-1]) - log(rate[j,p-1])) -
+      sum(stateProb[,j,]*mixProb[,j,p,]*obs)*(shape[j,p-1]/rate[j,p-1] ) + h[j,p-1] #- h_j0[j,p-1]
+  }
+  kl_A <- kl_A + sum(rowSums(A_t,dims = 2)[j,]*( digamma(alpha[j,]) - digamma(sum(alpha[j,])) )) +
+    lgamma(sum(alpha[j,])) - sum(lgamma(alpha[j,]))   #-
+    #lgamma(sum(alpha_0[j,])) + sum(lgamma(alpha_0[j,]))
+}
+
+kl_pi = sum(apply(initProb, 2, sum)*(digamma(pi_1) - digamma(sum(pi_1)))) +
+  lgamma(sum(pi_1)) - sum(lgamma(pi_1)) #- lgamma(sum(pi_0)) + sum(lgamma(pi_0)) 
+elbo = -sum(log(ct_wide)) - kl_theta - kl_A  - kl_C  - kl_pi
+return(elbo)
+}
