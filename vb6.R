@@ -2,23 +2,15 @@ library(ConnMatTools)
 #set.seed(Sys.time())
 source('./functionDefns.R')
 source('./datasim.R')
-N         <- length(y) # number of days
-P         <- 3
-K         <- 3
-numDays   <- 1800
-numYears  <- N/numDays
+N         <- length(y)  # Data length
+P         <- 3          # Number of mixture components
+K         <- 3          # Number of states
+numDays   <- 1800       # Number of days
+numYears  <- N/numDays  # Number of years
 y2        <- matrix(y,ncol = numYears,byrow = F)
 del_y0    <- ifelse(y2==0,1,0)
 
-#### Initial estimates of hyperparameters
-gamma_0     <- matrix(data = c(.5,2,1.5,9,2,16),nrow = K,ncol = P-1,byrow = T) # shape of exponential rate
-delta_0     <- matrix(data = c(2,2,2,2,2,2),nrow = K,ncol = P-1,byrow = T) # rate of exponential rate
-zeta_0      <- matrix(data = c(6,8,6,6,7,7,8,6,6),nrow = K,ncol = P,byrow = T)/(P-1) # Dirichlet prior parameters for mixing probabilities
-alpha_0     <- matrix(rep(10,K^2),nrow = K,byrow = T)/K # Dirichlet prior for transition matrix rows
-pi_0        <- rep(1,K)/K # Dirichlet prior for initial probabilities
-h_j0        <- gamma_0*log(delta_0) - lgamma(gamma_0) # constant terms in prior (log)
-
-#### Variational Bayes iterations
+#### Convergence criteria
 maxiter   <- 300 # number of iterations to run the code for
 dic       <- rep(0,maxiter)
 dic_old   <- 50000 
@@ -30,6 +22,15 @@ tol       <- 10^(-7)
 iter      <- 1
 improvement_dic   <- (dic_old-dic[1])/dic_old
 improvement_elbo  <- (elbo_old-elbo[1])/elbo_old
+numPrint  <- 10 # Print ELBO/DIC after a certain number of iterations
+
+#### Initial estimates of hyperparameters
+gamma_0     <- matrix(data = c(.5,2,1.5,9,2,16),nrow = K,ncol = P-1,byrow = T) # shape of exponential rate
+delta_0     <- matrix(data = c(2,2,2,2,2,2),nrow = K,ncol = P-1,byrow = T) # rate of exponential rate
+zeta_0      <- matrix(data = c(6,8,6,6,7,7,8,6,6),nrow = K,ncol = P,byrow = T)/(P-1) # Dirichlet prior parameters for mixing probabilities
+alpha_0     <- matrix(rep(10,K^2),nrow = K,byrow = T)/K # Dirichlet prior for transition matrix rows
+pi_0        <- rep(1,K)/K # Dirichlet prior for initial probabilities
+h_j0        <- gamma_0*log(delta_0) - lgamma(gamma_0) # constant terms in prior (log)
 
 #### Initial estimates of latent variables
 a_jl        <- matrix(NA,nrow = K, ncol = K) # posterior state kernel
@@ -72,11 +73,11 @@ h_jp        <- matrix(nrow = K,ncol = P-1) # constant terms in posterior (log)
 pi_j        <- pi_0 # posterior Dirichlet paramters for initial distribution
 
 #### Variables to run and store VB results
-gamma_post  <- matrix(nrow = maxiter,ncol = K*(P-1))
-delta_post  <- matrix(nrow = maxiter,ncol = K*(P-1))
-zeta_post   <- matrix(nrow = maxiter,ncol = K*P)
-alpha_post  <- matrix(nrow = maxiter,ncol = K*K)
-logh_post   <- matrix(nrow = maxiter,ncol = K)
+gamma_iters  <- matrix(nrow = maxiter,ncol = K*(P-1))
+delta_iters  <- matrix(nrow = maxiter,ncol = K*(P-1))
+zeta_iters   <- matrix(nrow = maxiter,ncol = K*P)
+alpha_iters  <- matrix(nrow = maxiter,ncol = K*K)
+logh_iters   <- matrix(nrow = maxiter,ncol = K)
 
 #### Variational optimization begins
 while((abs(improvement_elbo) > tol | improvement_elbo <0) & iter<maxiter)
@@ -158,10 +159,10 @@ while((abs(improvement_elbo) > tol | improvement_elbo <0) & iter<maxiter)
     h_jp <- gamma_jp*log(delta_jp) - lgamma(gamma_jp)
   
     #### Store paramter updates from this iteration
-    gamma_post[iter,] <- gamma_jp
-    delta_post[iter,] <- delta_jp
-    zeta_post[iter,] <- as.vector(zeta_j)
-    alpha_post[iter,] <- as.vector(alpha_j)
+    gamma_iters[iter,]  <- gamma_jp
+    delta_iters[iter,]  <- delta_jp
+    zeta_iters[iter,]   <- as.vector(zeta_j)
+    alpha_iters[iter,]  <- as.vector(alpha_j)
 
     #### DIC and ELBO calculations
     dic[iter+1]     <- uDIC(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transition_mat,
@@ -175,17 +176,17 @@ while((abs(improvement_elbo) > tol | improvement_elbo <0) & iter<maxiter)
     improvement_elbo <- (elbo[iter+1]-elbo_old)/abs(elbo_old)
 
 
-    if(iter%%10==0)
+    if(iter%%numPrint==0)
     #print(paste(iter, dic[iter+1],improvement_dic))
     print(paste(iter,elbo[iter],improvement_elbo))
     iter <- iter+1
     }
 
-params <- post_param(numStates = K,numMix = P,gamma.post = gamma_jp,delta.post = delta_jp, zeta = zeta_j, alpha = alpha_j, pi_j = pi_j)
+params      <- post_param(numStates = K,numMix = P,gamma.post = gamma_jp,delta.post = delta_jp, zeta = zeta_j, alpha = alpha_j, pi_j = pi_j)
 params
-pi.post <- params$InitDist
-tmat.post <- params$TransMat
-zeta.post <- params$MixProb
+pi.post     <- params$InitDist
+tmat.post   <- params$TransMat
+zeta.post   <- params$MixProb
 lambda.post <- params$RainRate
 
 plot <- T
