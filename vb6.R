@@ -1,12 +1,13 @@
 library(ConnMatTools)
 #set.seed(Sys.time())
 source('./functionDefns.R')
-source('./datasim.R')
-N         <- length(y)  # Data length
+#set.seed(0)
+N         <- 1800  # Data length
 P         <- 3          # Number of mixture components
 K         <- 3          # Number of states
-numDays   <- 1800       # Number of days
+numDays   <- 90       # Number of days
 numYears  <- N/numDays  # Number of years
+source('./datasim.R')
 y2        <- matrix(y,ncol = numYears,byrow = F)
 del_y0    <- ifelse(y2==0,1,0)
 
@@ -18,7 +19,7 @@ dic[1]    <- 25000
 elbo      <- rep(0,maxiter)
 elbo_old  <- -50000 
 elbo[1]   <- -25000
-tol       <- 10^(-7)
+tol       <- 10^(-6)
 iter      <- 1
 improvement_dic   <- (dic_old-dic[1])/dic_old
 improvement_elbo  <- (elbo_old-elbo[1])/elbo_old
@@ -56,7 +57,7 @@ for(j in 1:K){
   q_tj[,j,m] <- sum(s_t[,m]==j)/numDays
   q_tjp[,j,1,] <- del_y0
   for(p in 2:P)
-    q_tjp[,j,p,m] <- (1-del_y0)/(P-1)
+    q_tjp[,j,p,m] <- (1-del_y0[,m])/(P-1)
   for(t in 1:numDays){
   sum_q <- sum(q_tjp[t,j,,m])
   q_tjp[t,j,-1,m] <- q_tjp[t,j,-1,m]/sum_q
@@ -146,7 +147,7 @@ while((abs(improvement_elbo) > tol | improvement_elbo <0) & iter<maxiter)
   #### Update hyperparameters
   for(j in 1:K)
     {
-    pi_j[j] <- pi_0[j] + mean(q_p[,j])
+    pi_j[j] <- pi_0[j] + sum(q_p[,j])
     zeta_j[j,1] <- zeta_0[j,1] + sum(q_tj[,j,]*q_tjp[,j,1,])
     for(p in 2:P)
       {
@@ -166,7 +167,7 @@ while((abs(improvement_elbo) > tol | improvement_elbo <0) & iter<maxiter)
 
     #### DIC and ELBO calculations
     dic[iter+1]     <- uDIC(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transition_mat,
-                       ct=ct_wide,pi_1=pi_j,alpha=alpha_j,zeta=zeta_j,shape=gamma_jp,rate=delta_jp,initProb=q_p)
+                       ct=ct_wide,pi_1=pi_j,alpha=alpha_j,zeta=zeta_j,shape=gamma_jp,rate=delta_jp,initProb=q_p)[[2]]
     dic_old         <- dic[iter]
     improvement_dic <- (dic_old-dic[iter+1])/dic_old
 
@@ -176,7 +177,7 @@ while((abs(improvement_elbo) > tol | improvement_elbo <0) & iter<maxiter)
     improvement_elbo <- (elbo[iter+1]-elbo_old)/abs(elbo_old)
 
 
-    if(iter%%numPrint==0)
+    #if(iter%%numPrint==0)
     #print(paste(iter, dic[iter+1],improvement_dic))
     print(paste(iter,elbo[iter],improvement_elbo))
     iter <- iter+1
@@ -192,11 +193,12 @@ lambda.post <- params$RainRate
 plot <- T
 if(plot==T){
   for(p in 2:P)
-    plot(1:maxiter,gamma_post[,p-1],'l')
+    plot(1:maxiter,gamma_iters[,p-1],'l')
   for(p in 2:P)
-    plot(1:maxiter,delta_post[,p-1],'l')
+    plot(1:maxiter,delta_iters[,p-1],'l')
   for(p in 1:P)
-    plot(1:maxiter,zeta_post[,p],'l') 
+    plot(1:maxiter,zeta_iters[,p],'l') 
 }
+plot(3:iter,elbo[3:iter],'l')
 # y.sim=simulate.hmm.uni(duration=N,numChain = 1,numStates = K,numMix = P,initDist = params$InitDist,tmat = params$TransMat,
 #                         zeta = params$MixProb,lambda = params$RainRate)
