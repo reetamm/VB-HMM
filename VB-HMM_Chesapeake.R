@@ -19,7 +19,7 @@ loc   <- sample(1:1927,1) #1422
 seeds <- sample(1:1000,20) 
 
 if(read.data==T){
-  data  <- read.table('cbaywet')
+  data  <- read.table('data/cbaywet')
   dim(data)
   y     <- data[,loc+1]
 }
