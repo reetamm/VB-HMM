@@ -76,7 +76,7 @@ backward_recursion <- function(numObs = N, numStates = K, a = NULL, b = NULL, ct
   return(bvar_tilde)
 }
 
-post_param = function(numStates = K, numMix = P, gamma.post = gamma_jp, delta.post = delta_jp, zeta = zeta_j, alpha = alpha_j, pi_j = pi_j)
+post_param = function(numStates = K, numMix = P, gamma.post = gamma_jp, delta.post = delta_jp, zeta = zeta_j, alpha = alpha_j, xi = xi_j)
 {
   tmat.post <- matrix(nrow = numStates,ncol = numStates)
   lambda.post <- gamma.post/delta.post
@@ -85,7 +85,7 @@ post_param = function(numStates = K, numMix = P, gamma.post = gamma_jp, delta.po
       zeta.post[j,] <- zeta[j,]/sum(zeta[j,])
       tmat.post[j,] <- alpha[j,]/sum(alpha[j,])
       }
-  pi.post <- pi_j/sum(pi_j)
+  pi.post <- xi/sum(pi)
   
   output <- list('InitDist' = pi.post, 'TransMat' = tmat.post, 'MixProb' = zeta.post, 'RainRate' = lambda.post)
   return(output)
@@ -109,9 +109,26 @@ simulate.hmm.uni <- function(numDays, numYears=1,numStates, numMix, initDist,tma
   return(y.sim)
 }
 
+simulate.hmm.mult <- function(numDays, numYears=1, numLoc=1, numStates, numMix, initDist,tmat,zeta,lambda){
+  v.sim <- matrix(nrow = numDays,ncol = numYears)
+  duration <- numDays*numYears
+  for(year in 1:numYears)
+  {
+    u <- runif(numDays)
+    v.sim[,year] <- generate.mc(u,initDist,tmat)
+  }
+  v.sim.vector <- as.vector(v.sim)
+  mix.unif <- matrix(runif(duration),nrow = duration)
+  y.sim=rep(NA,duration)
+  for(t in 1:duration){
+    which.mixture <- initial.state(u=mix.unif[t],alpha = zeta[v.sim.vector[t],])
+    y.sim[t] <- ifelse(which.mixture==1,0,rexp(1,lambda[v.sim.vector[t],which.mixture-1]))
+  }
+  return(y.sim)
+}
+
 # DIC and ELBO calculations
-uDIC <- function(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transition_mat,
-                ct=ct_wide,pi_1=pi_j,alpha=alpha_j,zeta=zeta_j,shape=gamma_jp,rate=delta_jp,initProb=q_p){
+uDIC <- function(numStates, numMix, stateProb, mixProb, initProb, jtTransMat, ct, xi, alpha, zeta, gamma_shape, gamma_rate){
    pd0 <- 0
    pd1 <- 0
    pd2 <- 0
@@ -122,42 +139,69 @@ uDIC <- function(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transi
 
     for(p in 2:numMix)
     {
-      pd2 <- pd2 + sum(stateProb[,j,]*mixProb[,j,p,])*( log(shape[j,p-1]) - digamma(shape[j,p-1]) +
+      pd2 <- pd2 + sum(stateProb[,j,]*mixProb[,j,p,])*( log(gamma_shape[j,p-1]) - digamma(gamma_shape[j,p-1]) +
                    log(zeta[j,p]) - log(sum(zeta[j,])) - digamma(zeta[j,p]) + digamma(sum(zeta[j,])) )
      
     }
-    for(l in 1:numStates)
-    pd1 <- pd1 + rowSums(A_t,dims = 2)[j,l]*( log(alpha[j,l]) - log(sum(alpha[j,])) - digamma(alpha[j,l]) + digamma(sum(alpha[j,])) )
+    for(k in 1:numStates)
+    pd1 <- pd1 + rowSums(jtTransMat,dims = 2)[j,k]*( log(alpha[j,k]) - log(sum(alpha[j,])) - digamma(alpha[j,k]) + digamma(sum(alpha[j,])) )
    
   }
-  pd3 <- sum(initProb*(log(pi_1) - log(sum(pi_1)) - digamma(pi_1) + digamma(sum(pi_1))))
+  pd3 <- sum(initProb*(log(xi) - log(sum(xi)) - digamma(xi) + digamma(sum(xi))))
   pd <- pd0+sum(pd1)+pd2+pd3  
   dic <- 4*(pd)  + 2*sum(log(ct))
   output = list('pd' = pd, 'dic' = dic)
   return(output)
 }
 
-uELBO = function(numStates=K,numMix=P,stateProb=q_tj,mixProb=q_tjp,A_t=jt_transition_mat,
-                ct=ct_wide,pi_1=pi_j,alpha=alpha_j,zeta=zeta_j,shape=gamma_jp,rate=delta_jp,obs=y2,h=h_jp,initProb=q_p){
+
+uELBO = function(numStates, numMix, stateProb, mixProb, initProb, jtTransMat, ct, xi, alpha, zeta, gamma_shape, gamma_rate, obs, h){
   kl_C <- 0
   kl_A <- 0
   kl_theta <- 0
   kl_pi <- 0
   for(j in 1:numStates){
     kl_C <- kl_C + sum(stateProb[,j,]*mixProb[,j,1,])*(digamma(zeta[j,1]) - digamma(sum(zeta[j,])) ) + 
-    lgamma(sum(zeta[j,])) - sum(lgamma(zeta[j,])) #-
+      lgamma(sum(zeta[j,])) - sum(lgamma(zeta[j,])) #-
     #lgamma(sum(zeta_0[j,])) + sum(lgamma(zeta_0[j,]))
-    for(p in 2:numMix){
-      kl_C <- kl_C + sum(stateProb[,j,]*mixProb[,j,p,])*(digamma(zeta[j,p]) - digamma(sum(zeta[j,])) ) 
-      kl_theta <- kl_theta + sum(stateProb[,j,]*mixProb[,j,p,])*( digamma(shape[j,p-1]) - log(rate[j,p-1])) -
-                  sum(stateProb[,j,]*mixProb[,j,p,]*obs)*(shape[j,p-1]/rate[j,p-1] ) + h[j,p-1] #- h_j0[j,p-1]
+    for(m in 2:numMix){
+      kl_C <- kl_C + sum(stateProb[,j,]*mixProb[,j,m,])*(digamma(zeta[j,m]) - digamma(sum(zeta[j,])) ) 
+      kl_theta <- kl_theta + sum(stateProb[,j,]*mixProb[,j,m,])*( digamma(gamma_shape[j,m-1]) - log(gamma_rate[j,m-1])) -
+        sum(stateProb[,j,]*mixProb[,j,m,]*obs)*(gamma_shape[j,m-1]/gamma_rate[j,m-1] ) + h[j,m-1] #- h_j0[j,p-1]
     }
-    kl_A <- kl_A + sum(rowSums(A_t,dims = 2)[j,]*( digamma(alpha[j,]) - digamma(sum(alpha[j,])) )) +
+    kl_A <- kl_A + sum(rowSums(jtTransMat,dims = 2)[j,]*( digamma(alpha[j,]) - digamma(sum(alpha[j,])) )) +
+      lgamma(sum(alpha[j,])) - sum(lgamma(alpha[j,]))   #-
+    #lgamma(sum(alpha_0[j,])) + sum(lgamma(alpha_0[j,]))
+  }
+  kl_pi <- sum(apply(initProb, 2, sum)*(digamma(xi) - digamma(sum(xi)))) +
+    lgamma(sum(xi)) - sum(lgamma(xi)) #- lgamma(sum(pi_0)) + sum(lgamma(pi_0)) 
+  elbo <- - sum(log(ct)) - kl_theta - kl_A  - kl_C  - kl_pi
+  return(elbo)
+}
+
+ELBO = function(numStates, numMix, numLoc, stateProb, mixProb, initProb, jtTransMat, ct, xi, alpha, zeta, gamma_shape, gamma_rate, obs, h){
+  kl_C <- 0
+  kl_A <- 0
+  kl_theta <- 0
+  kl_pi <- 0
+  for(j in 1:numStates){
+    for(l in numLoc){
+      kl_C <- kl_C + sum(stateProb[,j,]*mixProb[,j,1,,l])*(digamma(zeta[j,1,l]) - digamma(sum(zeta[j,,l])) ) + 
+      lgamma(sum(zeta[j,,l])) - sum(lgamma(zeta[j,,l])) #-
+      #lgamma(sum(zeta_0[j,])) + sum(lgamma(zeta_0[j,]))
+      for(m in 2:numMix){
+        kl_C <- kl_C + sum(stateProb[,j,]*mixProb[,j,m,,l])*(digamma(zeta[j,m,l]) - digamma(sum(zeta[j,,l])) ) 
+        kl_theta <- kl_theta + sum(stateProb[,j,]*mixProb[,j,m,,l])*( digamma(gamma_shape[j,m-1,l]) - log(gamma_rate[j,m-1,l])) -
+                                sum(stateProb[,j,]*mixProb[,j,m,,l]*obs[,,l])*(gamma_shape[j,m-1,l]/gamma_rate[j,m-1,l] ) + h[j,m-1,l] #- h_j0[j,p-1]
+        }
+    }
+    kl_A <- kl_A + sum(rowSums(jtTransMat,dims = 2)[j,]*( digamma(alpha[j,]) - digamma(sum(alpha[j,])) )) +
             lgamma(sum(alpha[j,])) - sum(lgamma(alpha[j,]))   #-
             #lgamma(sum(alpha_0[j,])) + sum(lgamma(alpha_0[j,]))
   }
-  kl_pi <- sum(apply(initProb, 2, sum)*(digamma(pi_1) - digamma(sum(pi_1)))) +
-          lgamma(sum(pi_1)) - sum(lgamma(pi_1)) #- lgamma(sum(pi_0)) + sum(lgamma(pi_0)) 
-  elbo <- - sum(log(ct_wide)) - kl_theta - kl_A  - kl_C  - kl_pi
+  kl_pi <-  sum(apply(initProb, 2, sum)*(digamma(xi) - digamma(sum(xi)))) +
+            lgamma(sum(xi)) - sum(lgamma(xi)) #- lgamma(sum(pi_0)) + sum(lgamma(pi_0)) 
+  elbo <- - sum(log(ct)) - kl_theta - kl_A  - kl_C  - kl_pi
+  #print(paste(elbo,- sum(log(ct)),-kl_theta-kl_A-kl_C))
   return(elbo)
 }
