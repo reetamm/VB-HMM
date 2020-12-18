@@ -28,3 +28,8 @@ vignettes/*.pdf
 .Renviron
 rmse and scatterplots.R
 vb7.R
+data/brazil_precip_data
+data/cbaywet
+data/data1
+data/original
+data/simulated
